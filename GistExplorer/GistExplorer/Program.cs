@@ -121,7 +121,7 @@ namespace GistExplorer
                     Console.Write("Select snippet: ");
                     int.TryParse(Console.ReadLine(), out SnipSelect);
                 } while (SnipSelect == -1);
-                if (SnipSelect > 0)
+                if (SnipSelect > 0 || SnipSelect > SearchResults.Count())
                 {
                     Console.Clear();
                     Banner();
