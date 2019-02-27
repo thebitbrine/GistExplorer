@@ -2,21 +2,23 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
+using System.Net.Http;
+using System.Threading;
 using System.Windows.Forms;
-using HtmlAgilityPack;
-using HtmlDocument = HtmlAgilityPack.HtmlDocument;
+using QuickType;
 
 namespace GistExplorer
 {
     class Program
     {
+        public Gists[] GlobalGists;
         [STAThread]
         static void Main(string[] args)
         {
+            ServicePointManager.Expect100Continue = true;
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             Program p = new Program();
-            Console.Title = "GistExplorer v1.0";
+            Console.Title = "GistExplorer v1.2";
             Console.Clear();
             if (args.Length == 0)
             {
@@ -27,51 +29,83 @@ namespace GistExplorer
             while (true)
             {
                 p.Run(args);
-                Console.ReadKey();
                 Console.Clear();
             }
 
+        }
+
+        public void GetAllGists(string Username)
+        {
+            var Response = GetWebString($"https://api.github.com/users/{Username}/gists?per_page=10000");
+            GlobalGists = Gists.FromJson(Response);
+        }
+
+        public Gists[] Search(string Query)
+        {
+            List<Gists> Results = new List<Gists>();
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Key.StartsWith(Query) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Key.ToLower().StartsWith(Query.ToLower()) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Key.Contains(Query) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Key.ToLower().Contains(Query.ToLower()) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Key.EndsWith(Query) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Key.ToLower().EndsWith(Query.ToLower()) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Value.Language.HasValue && File.Value.Language.Value.ToString().ToLower().Contains(Query.ToLower()) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (File.Value.Language.HasValue && Query.ToLower().Contains(File.Value.Language.Value.ToString().ToLower()) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            foreach (var Gist in GlobalGists)
+                foreach (var File in Gist.Files)
+                    if (Gist.Description.ToLower().Contains(Query.ToLower()) && !Results.Contains(Gist))
+                        Results.Add(Gist);
+
+            return Results.ToArray();
         }
 
         public string User = "NOT SET";
         public void Run(string[] args)
         {
             User = args[0];
+            if(GlobalGists == null || GlobalGists?.Count() <= 0)
+                new Thread(() => GetAllGists(User)) { IsBackground = true}.Start();
             Banner();
-            List<Snippet> SnippList = new List<Snippet>();
-            ServicePointManager.Expect100Continue = true;
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             Console.Write("Enter query: ");
-            string Query = Console.ReadLine().ToLower();
-            string Response = "";
-            if (!string.IsNullOrWhiteSpace(Query))
-                Response = GetWebString($"http://gist.github.com/search?utf8=%E2%9C%93&q=user%3A{User}+filename%3A{Query}&ref=searchresults");
-            else
-                Response = GetWebString($"http://gist.github.com/search?utf8=%E2%9C%93&q=user%3A{User}&ref=searchresults");
-            HtmlDocument Doc = new HtmlDocument();
-            Doc.LoadHtml(Response);
-            var Snippets = Doc.DocumentNode.SelectNodes("//div[@class='gist-snippet']");
-            int Index = 0;
-            if (Snippets != null)
+            string Query = Console.ReadLine();
+            while (GlobalGists == null) Thread.Sleep(250);
+            var SearchResults = Search(Query);
+
+            if (SearchResults.Count() > 0)
             {
-                foreach (var Snippet in Snippets)
-                {
-                    if (Snippets[Index].Name == "div")
-                    {
-                        Snippet InnerSnippet = new Snippet();
-                        InnerSnippet.Creator = Snippet.SelectNodes("//span[contains(@class, 'creator')]/a[1]")[Index].InnerText;
-                        InnerSnippet.Name = Snippet.SelectNodes("//span[contains(@class, 'creator')]/a[2]")[Index].InnerText;
-                        InnerSnippet.LastActive = Snippet.SelectNodes("//div[contains(@class, 'extra-info')]/time-ago[1]")[Index].InnerText;
-                        InnerSnippet.Description = Snippet.SelectNodes("//span[contains(@class, 'description')]")[Index].InnerText.Replace("\n", "").TrimEnd(new char[] { ' ' }).TrimStart(new char[] { ' ' });
-
-
-                        InnerSnippet.IDHash = Snippet.SelectNodes("//div[contains(@class, 'file-box')]/a[1]")[Index].Attributes[1].Value;
-                        //string CodeLinkResponse = GetWebString($"{CodeLink}/raw");
-                        SnippList.Add(InnerSnippet);
-                        Index++;
-                    }
-                }
-
                 int SnipSelect = -1;
                 do
                 {
@@ -79,36 +113,41 @@ namespace GistExplorer
                     Banner();
                     Console.WriteLine("Query results:");
                     int qIndex = 1;
-                    foreach (var Snipp in SnippList)
+                    foreach (var Snipp in SearchResults)
                     {
-                        Console.WriteLine($"{qIndex.ToString().PadLeft(2,'0')}) {Snipp.Name.PadRight(25,' ')}\t| {Snipp.Creator},\t{NeatDate(Snipp.LastActive)},\t{StringLimit(Snipp.Description, 50)}");
+                        Console.WriteLine($" {qIndex.ToString().PadLeft(2, '0')}) {StringLimit(Snipp.Files.First().Key, 27).PadRight(26, ' ')}\t| {User},\t{NeatDate(Snipp.UpdatedAt)},\t{StringLimit(Snipp.Description, 50)}");
                         qIndex++;
                     }
                     Console.Write("Select snippet: ");
                     int.TryParse(Console.ReadLine(), out SnipSelect);
-                } while (SnipSelect == -1 || SnipSelect == 0 || SnipSelect > SnippList.Count);
-                Console.Clear();
-                Banner();
-                Console.WriteLine($"Downloading {SnippList[SnipSelect - 1].Name}...");
-                Console.Clear();
-                Banner();
-                string RawSnippet = GetWebString($"{SnippList[SnipSelect - 1].IDHash}/raw");
-                Clipboard.SetText(RawSnippet);
-                Console.WriteLine(SnippList[SnipSelect - 1].Name + " copied to clipboard.");
+                } while (SnipSelect == -1 || SnipSelect > SearchResults.Count());
+                if (SnipSelect > 1)
+                {
+                    Console.Clear();
+                    Banner();
+                    Console.WriteLine($"Downloading {SearchResults[SnipSelect - 1].Files.First().Key}...");
+                    Console.Clear();
+                    Banner();
+                    string RawSnippet = GetWebString(SearchResults[SnipSelect - 1].Files.First().Value.RawUrl.ToString());
+                    Clipboard.SetText(RawSnippet);
+                    Console.WriteLine(SearchResults[SnipSelect - 1].Files.First().Key + " copied to clipboard.");
+                    Console.ReadKey();
+                }
             }
             else
             {
                 Console.WriteLine("Nothing found.");
+                Console.ReadKey();
             }
         }
         
-        public string NeatDate(string Date)
+        public string NeatDate(DateTimeOffset Date)
         {
-            if(Date[5] == ',')
-            {
-                return Date.Substring(0, 4) + "0" + Date.Substring(4);
-            }
-            return Date;
+            string Month = Date.ToString("MMM");
+            string Day = Date.Day.ToString("D2");
+            string Year = Date.Year.ToString();
+
+            return $"{Month} {Day} {Year}";
         }
 
         public string StringLimit(string Text, int Limit)
@@ -121,15 +160,42 @@ namespace GistExplorer
             return Text;
         }
 
-        public string GetWebString(string URL)
+        public string GetWebString1(string URL)
         {
-            return new System.Net.WebClient() { Encoding = System.Text.Encoding.UTF8 }.DownloadString(URL);
+            var client = new System.Net.WebClient() { Encoding = System.Text.Encoding.UTF8 };
+            client.Headers.Add(HttpRequestHeader.UserAgent, "Mozilla/5.0 (compatible; MSIE 10.0; Windows Phone 8.0; Trident/6.0; IEMobile/10.0; ARM; Touch; NOKIA; Lumia 520)");
+            client.Headers.Add(HttpRequestHeader.Accept, "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
+            //client.Headers.Add(HttpRequestHeader.AcceptEncoding, "gzip, deflate, br");
+            client.Headers.Add(HttpRequestHeader.AcceptLanguage, "en-US,en;q=0.9");
+            client.Headers.Add(HttpRequestHeader.CacheControl, "max-age=0");
+            client.Headers.Add(HttpRequestHeader.Host, "gist.github.com");
+            return client.DownloadString(URL);
         }
+
+
+
+        public static string GetWebString(string URI)
+        {
+            HttpClientHandler handler = new HttpClientHandler()
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            };
+
+            using (var httpClient = new HttpClient(handler))
+            {
+                using (var request = new HttpRequestMessage(new HttpMethod("GET"), URI))
+                {
+                    request.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.109 Mobile Safari/537.36");
+                    return httpClient.SendAsync(request).Result.Content.ReadAsStringAsync().Result;
+                }
+            }
+        }
+
 
         public void Banner()
         {
             Console.WriteLine(CenterString($"[{User}]", 40));
-            Console.WriteLine("  GistExplorer v1.0 (Ultimate Edition)  ");
+            Console.WriteLine("  GistExplorer v1.2 (Ultimate Edition)  ");
             Console.WriteLine("========================================");
         }
         
@@ -303,14 +369,5 @@ namespace GistExplorer
             }
         }
         #endregion
-
-        public class Snippet
-        {
-            public string Creator { get; set; }
-            public string Name { get; set; }
-            public string Description { get; set; }
-            public string LastActive { get; set; }
-            public string IDHash { get; set; }
-        }
     }
 }
